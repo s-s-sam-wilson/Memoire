@@ -1,6 +1,7 @@
 import base64
 import os
 import uuid
+
 from django.core.files.storage import FileSystemStorage
 from rest_framework.decorators import api_view
 from rest_framework import status
@@ -8,6 +9,9 @@ from ..serializers import ResponseSerializer, ResponseAnswerSerializer
 from base.models import Responses, Url_slambook, Questions, Response_answer, Question_Options, Slambooks
 from django.conf import settings
 from rest_framework.views import Response
+import cloudinary
+import cloudinary.uploader
+
 
 # Create FileSystemStorage instance with media location
 fs = FileSystemStorage(location=settings.MEDIA_ROOT, base_url=settings.MEDIA_URL)
@@ -123,6 +127,15 @@ def submit_slambook_response(request, urlid):
         )
 
 
+
+# Configure Cloudinary (typically in settings.py)
+cloudinary.config(
+    cloud_name='cloudname',
+    api_key='apikey',
+    api_secret='apikey'
+)
+
+
 @api_view(['POST'])
 def upload_image(request):
     try:
@@ -138,13 +151,19 @@ def upload_image(request):
             return Response({"error": "File size exceeds 5MB limit"}, status=status.HTTP_400_BAD_REQUEST)
 
         filename, ext = os.path.splitext(file_obj.name)
-        unique_filename = f"{filename}_{uuid.uuid4().hex}{ext}"
+        unique_filename = f"{filename}_{uuid.uuid4().hex}"
 
-        # Save to /media/filename
-        saved_filename = fs.save(unique_filename, file_obj)
+        # Upload to Cloudinary
+        upload_result = cloudinary.uploader.upload(
+            file_obj,
+            public_id=unique_filename,
+            resource_type="image"
+        )
 
-        # Return only the filename (no /media/)
-        return Response({"fileUrl": saved_filename}, status=status.HTTP_201_CREATED)
+        # Return the Cloudinary URL
+        return Response({
+            "fileUrl": upload_result['secure_url']
+        }, status=status.HTTP_201_CREATED)
 
     except Exception as e:
         return Response({"error": f"Upload failed: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -162,27 +181,35 @@ def response_answers(request, responseid):
 
 
 @api_view(['GET'])
-def get_image(request, filename):
+def get_image(request):
     try:
-        # Fetch from /media/filename
-        file_path = fs.path(filename)
+        # Get image from Cloudinary
+        # Note: filename should be the public_id used during upload
+        filenames = request.GET.get('filename')
+        image_url = cloudinary.utils.cloudinary_url(filenames)[0]
 
-        if not os.path.exists(file_path):
+        # Fetch the image data
+        import requests
+        response = requests.get(image_url)
+
+        if response.status_code != 200:
             return Response({"error": "Image not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        with open(file_path, "rb") as image_file:
-            image_data = base64.b64encode(image_file.read()).decode("utf-8")
-            content_type = "image/jpeg"
-            if filename.endswith(".png"):
-                content_type = "image/png"
-            elif filename.endswith(".jpg") or filename.endswith(".jpeg"):
-                content_type = "image/jpeg"
-            elif filename.endswith(".gif"):
-                content_type = "image/gif"
+        # Convert to base64
+        image_data = base64.b64encode(response.content).decode("utf-8")
 
-            return Response(
-                {"imageData": f"data:{content_type};base64,{image_data}"},
-                status=status.HTTP_200_OK
-            )
+        # Determine content type from filename
+        content_type = "image/jpeg"
+        if filenames.endswith(".png"):
+            content_type = "image/png"
+        elif filenames.endswith(".jpg") or filenames.endswith(".jpeg"):
+            content_type = "image/jpeg"
+        elif filenames.endswith(".gif"):
+            content_type = "image/gif"
+
+        return Response(
+            {"imageData": f"data:{content_type};base64,{image_data}"},
+            status=status.HTTP_200_OK
+        )
     except Exception as e:
         return Response({"error": f"Failed to fetch image: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

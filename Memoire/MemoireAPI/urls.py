@@ -25,6 +25,6 @@ urlpatterns = [
     path('slam/<uuid:urlid>/submit/', submit_slambook_response, name='submit-slambook-response'),
     path('upload/', upload_image, name='upload-image'),
     path('responses/<uuid:responseid>/answers/', response_answers, name='response-answers'),
-    path('image/<str:filename>/', get_image, name='get-image'),
+    path('image/', get_image, name='get-image'),
     path('slambook/<str:slamid>/export/', export_slambook_responses, name='export_slambook_responses'),
 ]
